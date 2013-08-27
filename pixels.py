@@ -1,6 +1,6 @@
 import pygame
 from time import sleep
-from random import random
+from random import random, shuffle
 
 class Sorter:
 	def __init__(self):
@@ -42,10 +42,45 @@ class rotate(Sorter):
 	def sort(self,image):
 		return pygame.transform.rotate(image,90*self.turns)
 
+class apply_mask(Sorter):
+	def __init__(self,filter1, filter2, maskfilter):
+		self.filter1=filter1
+		self.filter2=filter2
+		self.maskfilter=maskfilter
 
+	def sort(self,image):
+		print "generating base"
+		base =self.filter1.sort(image.copy())
+		print "generating overlay"
+		maskimg = self.filter2.sort(image.copy()).convert_alpha() 
+		print "generating mask"
+		mask = self.maskfilter.sort(image)
 
+		print"applying mask"
 
+		for x in range(base.get_width()):
+			for y in range(base.get_height()):
+				# so painfully inefficient
+				c=maskimg.get_at((x,y))
+				c.a=int((mask.get_at((x,y)).hsva[2]/100.0)*255)
+				maskimg.set_at((x,y), c)
+		base.blit(maskimg, (0,0))
+		return base
 
+class invert(Sorter):
+	def __init__(self, filterm):
+		self.filterm=filterm
+
+	def inverted(self,img):
+	   inv = pygame.Surface(img.get_rect().size, pygame.SRCALPHA)
+	   inv.fill((255,255,255,255))
+	   inv.blit(img, (0,0), None, pygame.BLEND_RGB_SUB)
+	   return inv
+
+	def sort(self,image):
+		print "inverting"
+		i = self.filterm.sort(image)
+		return self.inverted(i)
 
 
 
@@ -382,7 +417,7 @@ class transposebits(Sorter):
 		start = int(n*self.startpoint)
 		end = int(n*self.startpoint+n*self.length)
 
-		new = buff[0:start]+buff[start:end]
+		new = buff[0:start]+buff[end:]
 		ins=buff[start:end]
 		
 		inspoint = int( n*self.insert )
@@ -394,11 +429,104 @@ class randomtransposition(transposebits):
 	def __init__(self):
 		transposebits.__init__(self,random(),random(),random())
 
+class _aware_block(Sorter):
+	def __init__(self, blocksize):
+		self.blocksize = blocksize
+
+	def mapdetail(self,image):
+		clone = pygame.transform.scale( image.copy(), (image.get_width()/self.blocksize,image.get_height()/self.blocksize))
+
+		detailmap = []
+		for x in range(clone.get_width()):
+			detailmap.append([])
+			for y in range(clone.get_height()):
+				reference = pygame.Surface((self.blocksize, self.blocksize))
+				reference.blit(image,(-x*self.blocksize, -y*self.blocksize))
+
+				diff = 0
+				orgcolor = clone.get_at((x,y))
+				for _x in range(reference.get_width()):
+					for _y in range(reference.get_height()):
+						 newcolor = reference.get_at((_x,_y))
+						 diff += abs(newcolor.r-orgcolor.r)
+						 diff += abs(newcolor.g-orgcolor.g)
+						 diff += abs(newcolor.b-orgcolor.b)
+				diff=diff/(3.0*self.blocksize*self.blocksize)
+				detailmap[x].append(diff)
+		return detailmap
+
+#inspired by mekon18's work
+class aware_block_display(_aware_block):
+	def __init__(self, blocksize):
+		_aware_block.__init__(self, blocksize)
+
+	def sort(self,image):
+		image=image.copy()
+		detailmap = self.mapdetail(image)
+		maxdet = 255*3
+
+		block = pygame.Surface((self.blocksize,self.blocksize))
+		for x in range(len(detailmap)):
+			for y in range(len(detailmap[x])):
+				block.set_alpha(detailmap[x][y])
+				image.blit(block,(x*self.blocksize, y*self.blocksize))
+		return image
+
+class aware_block_mask(_aware_block):
+	def __init__(self, blocksize):
+		_aware_block.__init__(self, blocksize)
+
+	def sort(self,image):
+		mask=pygame.Surface( (image.get_width(), image.get_height()) )
+		mask.fill(pygame.Color(255,255,255,255))
+
+		detailmap = self.mapdetail(image)
+
+		block = pygame.Surface((self.blocksize,self.blocksize))
+		for x in range(len(detailmap)):
+			for y in range(len(detailmap[x])):
+				block.set_alpha(255-detailmap[x][y])
+				mask.blit(block,(x*self.blocksize, y*self.blocksize))
+		return mask
 
 
 
+#see also david szauder's 'gil'
+class aware_block_scramble(_aware_block):
+	def __init__(self,blocksize,threshold):
+		_aware_block.__init__(self,blocksize)
+		self.threshold = threshold
 
+	def sort(self,image):
+		copy=image.copy()
+		print "analyzing"
+		detailmap = self.mapdetail(image)
 
+		print "calculating average detail"
+		avg=0
+		for x in range(len(detailmap)):
+			for y in range(len(detailmap[x])):
+				avg+=detailmap[x][y]
+		avg=avg/len(detailmap)/len(detailmap[0])
+
+		print "avg was %s"%(avg)
+
+		print "determining what to scramble"
+		scramble=[]
+		for x in range(len(detailmap)):
+			for y in range(len(detailmap[x])):
+				if(detailmap[x][y]>self.threshold):
+					scramble.append( (x,y) )
+		
+		print "scrambling"
+		block = pygame.Surface((self.blocksize,self.blocksize))
+		original = list(scramble)
+		shuffle(scramble)#should fix so is nonrandom.
+
+		for i in range(len(scramble)):
+			block.blit(image, (-original[i][0]*self.blocksize,-original[i][1]*self.blocksize) )
+			copy.blit(block, (scramble[i][0]*self.blocksize,scramble[i][1]*self.blocksize) )
+		return copy
 
 
 
@@ -415,6 +543,8 @@ def main():
 
 	print "working"
 
+	pygame.display.set_mode((100,20))
+
 	#sorter = Chain( sortbycolumn(1) )
 	#sorter = Chain( oradjacent(), rotate(1), sortbycolumn(20), rotate(-1) )
 	#sorter = Chain( andadjacent(), rotate(1), sortbycolumn(20), rotate(-1), sortbycolumn(20))
@@ -428,8 +558,10 @@ def main():
 	#sorter = Chain(sortbycolumn(20))
 	
 	#sorter = transposebits(0.2,0.2,0.3)
-	#sorter = repeat( 10, randomtransposition() )
-	sorter = Chain( repeat( 10, randomtransposition() ), rotate(1), sortbycolumn(10), rotate(3) )
+	sorter = repeat( 10, randomtransposition() )
+	#sorter = Chain( aware_block_display(40), aware_block_display(40) )
+	#sorter = Chain( aware_block_scramble(5,40))
+	#sorter = apply_mask( Sorter(), xoradjacent(), invert( aware_block_mask(40)) )
 
 
 	raw = pygame.image.load("test.jpg")
