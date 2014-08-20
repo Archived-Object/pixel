@@ -1,4 +1,4 @@
-import pygame
+import pygame, sys
 from time import sleep
 from random import random, shuffle
 
@@ -42,6 +42,15 @@ class rotate(Sorter):
 	def sort(self,image):
 		return pygame.transform.rotate(image,90*self.turns)
 
+class flip(Sorter):
+	def __init__(self,horizontal, vertical):
+		self.horizontal=horizontal
+		self.vertical=vertical
+
+	def sort(self,image):
+		return pygame.transform.flip(image, self.horizontal, self.vertical)
+
+
 class apply_mask(Sorter):
 	def __init__(self,filter1, filter2, maskfilter):
 		self.filter1=filter1
@@ -63,7 +72,7 @@ class apply_mask(Sorter):
 				# so painfully inefficient
 				c=maskimg.get_at((x,y))
 				c.a=int((mask.get_at((x,y)).hsva[2]/100.0)*255)
-				maskimg.set_at((x,y), c)
+				maskimg.set_at((x,y), fixColor(c))
 		base.blit(maskimg, (0,0))
 		return base
 
@@ -122,7 +131,7 @@ class RelayScrambler(Sorter):
 							if(n>255):
 								n=255
 							b.b=n
-					copysurf.set_at( (x,ay), b) 
+					copysurf.set_at( (x,ay), fixColor(b)) 
 
 		return copysurf
 
@@ -168,7 +177,7 @@ class MeltIntoWall_broken_1(Sorter):
 					#print (b,order)
 
 					for i in range(len(order)):
-						out.set_at( (x,regionstart+i), order[i] )
+						out.set_at( (x,regionstart+i), fixColor(order[i]) )
 
 					regionstart=y
 		return out
@@ -205,7 +214,7 @@ class MeltIntoWall_broken_2(Sorter):
 					#print (b,order)
 
 					for i in range(len(order)):
-						out.set_at( (x,regionstart+i), order[i] )
+						out.set_at( (x,regionstart+i), fixColor(order[i]) )
 
 					regionstart=y
 		return out
@@ -230,24 +239,26 @@ class MeltIntoWall(Sorter):
 	def isWall(self,color):
 		return color.hsva[2]<=10
 
-	def isLarger(self,colorA,colorB):
-		return colorA.hsva[2]>colorB.hsva[2]
+	def getKey(self,color):
+		return color.hsva[2]
 
 	def sort(self,image):
 		out = image.copy();
 		for x in range(image.get_width()):
+			if x%100 == 0:
+				print "column %s / %s)"%(x, image.get_width());
 			regionstart=0
 			for y in range(image.get_height()):
 				if(self.isWall(image.get_at( (x,y) )) or y==image.get_height()-1):
 					order = range(regionstart,y)
 					for i in range(len(order)):
-						order[i]=image.get_at( (x,order[i]) )
+						order[i]=image.get_at( (x, order[i]) )
 
-					order.sort(key = lambda x: x.hsva[2])
+					order.sort(key = lambda x: self.getKey(x))
 					#print (image.get_height(), len(order));
 
 					for i in range(len(order)):
-						out.set_at( (x,regionstart+i), order[i] )
+						out.set_at( (x,regionstart+i), fixColor(order[i]) )
 
 					regionstart=y
 		return out
@@ -258,16 +269,13 @@ class MeltByEh(MeltIntoWall):
 	def isWall(self,color):
 		return color.hsva[0]%10==0
 
-	def isLarger(self,colorA,colorB):
-		return colorA.hsva[1]>colorb.hsva[1]
+	def getKey(self,color):
+		return color.hsva[1]
 
 class Melt(MeltIntoWall):
 
 	def isWall(self,color):
 		return False
-
-	def isLarger(self,colorA,colorB):
-		return colorA.hsva[1]>colorb.hsva[1]
 
 
 
@@ -529,8 +537,51 @@ class aware_block_scramble(_aware_block):
 		return copy
 
 
+class Desaturate(Sorter):
+	def __init__(self,scale=1.0):
+		self.scale=scale
+
+	def sort(self,image):
+		for x in range(image.get_width()):
+			for y in range(image.get_height()):
+				d = image.get_at((x,y));
+				a = (d.r + d.g + d.b)/3
+				image.set_at((x,y),
+					fixColor(pygame.Color(
+						int(d.r* (1-self.scale) + a * self.scale),
+						int(d.g* (1-self.scale) + a * self.scale),
+						int(d.b* (1-self.scale) + a * self.scale)
+					))
+				)
+		return image
 
 
+class Greyscale(Sorter):
+	def __init__(self):
+		pass
+	def sort(self,image):
+		for x in range(image.get_width()):
+			for y in range(image.get_height()):
+				d = image.get_at((x,y));
+				a = (d.r + d.g + d.b)/3
+				image.set_at((x,y),pygame.Color(a,a,a))
+		return image
+
+
+
+def fixColor(color):
+	return (color[2],color[1],color[0]);
+
+
+class TestPygameColors(Sorter):
+	def sort(self, image):
+		out = image.copy();
+		print out.get_at((0,0))
+		for x in range(image.get_width()):
+			for y in range(image.get_height()):
+				cul = out.get_at((x,y));
+				out.set_at((x,y), fixColor(cul) );
+		return out;
 
 
 
@@ -543,45 +594,61 @@ def main():
 
 	print "working"
 
-	pygame.display.set_mode((100,20))
+	dispdone = "-s" in sys.argv
 
-	#sorter = Chain( sortbycolumn(1) )
+	if dispdone:
+		pygame.display.set_mode((100,20))
+
+	sorter = Chain( sortbycolumn(1) )
 	#sorter = Chain( oradjacent(), rotate(1), sortbycolumn(20), rotate(-1) )
 	#sorter = Chain( andadjacent(), rotate(1), sortbycolumn(20), rotate(-1), sortbycolumn(20))
 	#sorter = Chain( sortbycolumn(5), rotate(-1), sortbycolumn(5), rotate(1) )
 	#sorter = Chain( Melt(), rotate(1), Melt(), rotate(-1) )
+	#sorter = Chain( Melt() )
 	#sorter = Chain( rotate(1), sortbycolumn(10), rotate(-1), MeltByEh() )
 	#sorter = Chain( rotate(1), sortbycolumn(10), rotate(-1), RelayScrambler(), MeltByEh() )
 	#sorter = Chain( rotate(1), sortbycolumn(10), rotate(-1), xoradjacent(), MeltByEh() )
 	#sorter = Chain(rotate(-1), MeltByEh(), rotate(3), sortbycolumn(10) )
-	#sorter = Chain(rotate(-1), sortbycolumn(20), rotate(1))
+	#sorter = Chain(rotate(-1), sortbycolumn(20), rotate(1), rotate(1), Melt(), rotate(-1), flip(0,1))
 	#sorter = Chain(sortbycolumn(20))
 	
 	#sorter = transposebits(0.2,0.2,0.3)
-	sorter = repeat( 10, randomtransposition() )
+	#sorter = repeat( 30, randomtransposition() )
 	#sorter = Chain( aware_block_display(40), aware_block_display(40) )
 	#sorter = Chain( aware_block_scramble(5,40))
 	#sorter = apply_mask( Sorter(), xoradjacent(), invert( aware_block_mask(40)) )
 
+	#sorter = Chain( Melt(), flip(0,1) )
+	sorter = Chain( 
+		oradjacent(),
+		repeat(60, randomtransposition()),
+		Desaturate(0.6)
+		)
 
-	raw = pygame.image.load("test.jpg")
+	fil = "test.jpg"
+
+	if len(sys.argv)>1:
+		fil = sys.argv[1];
+
+	raw = pygame.image.load(fil)
 	out = sorter.sort( raw )
 	print "done"
 	joined = pygame.Surface( (raw.get_width()*2, raw.get_height()) )
 	joined.blit(raw, (0,0));
 	joined.blit(out, (raw.get_width(),0))
-	pygame.image.save(joined,"test_pair.jpg")
-	pygame.image.save(out,"test_out.jpg")
+	pygame.image.save(joined, fil+"_pair.png")
+	pygame.image.save(out, fil+"_out.png")
 
-	screen = pygame.display.set_mode((joined.get_width(), joined.get_height()))
-	running=True
-	while running:
-		for event in pygame.event.get():
-			if event.type == pygame.QUIT:
-				running=False
-		sleep(1.0/60)
-		screen.blit(joined,(0,0) )
-		pygame.display.flip()
+	if dispdone:
+		screen = pygame.display.set_mode((joined.get_width(), joined.get_height()))
+		running=True
+		while running:
+			for event in pygame.event.get():
+				if event.type == pygame.QUIT:
+					running=False
+			sleep(1.0/60)
+			screen.blit(joined,(0,0) )
+			pygame.display.flip()
 
 main()
 
