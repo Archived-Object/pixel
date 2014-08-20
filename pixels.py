@@ -20,7 +20,7 @@ class repeat(Sorter):
 
 	def sort(self,image):
 		for n in range(self.repeats):
-			print ">> repeat %s"%(n)
+			print ">> repeat %s\t%s"%(n, id(image))
 			image=self.sorter.sort(image)
 		return image
 
@@ -154,13 +154,13 @@ class MeltIntoWall_broken_1(Sorter):
 		return colorA.hsva[2]>colorB.hsva[2]
 
 	def qsort(self,list):
-	    if list == []: 
-	        return []
-	    else:
-	        pivot = list[0]
-	        lesser = self.qsort([x for x in list[1:] if self.isLarger(pivot,x)])
-	        greater = self.qsort([x for x in list[1:] if (x == pivot or self.isLarger(x,pivot))])
-	        return lesser + [pivot] + greater
+		if list == []: 
+			return []
+		else:
+			pivot = list[0]
+			lesser = self.qsort([x for x in list[1:] if self.isLarger(pivot,x)])
+			greater = self.qsort([x for x in list[1:] if (x == pivot or self.isLarger(x,pivot))])
+			return lesser + [pivot] + greater
 
 
 	def sort(self,image):
@@ -191,13 +191,13 @@ class MeltIntoWall_broken_2(Sorter):
 		return colorA.hsva[2]>colorB.hsva[2]
 
 	def qsort(self,list):
-	    if list == []: 
-	        return []
-	    else:
-	        pivot = list[0]
-	        lesser = self.qsort([x for x in list[1:] if self.isLarger(pivot,x)])
-	        greater = self.qsort([x for x in list[1:] if (x == pivot or self.isLarger(x,pivot))])
-	        return lesser + [pivot] + greater
+		if list == []: 
+			return []
+		else:
+			pivot = list[0]
+			lesser = self.qsort([x for x in list[1:] if self.isLarger(pivot,x)])
+			greater = self.qsort([x for x in list[1:] if (x == pivot or self.isLarger(x,pivot))])
+			return lesser + [pivot] + greater
 
 
 	def sort(self,image):
@@ -428,10 +428,12 @@ class transposebits(Sorter):
 		new = buff[0:start]+buff[end:]
 		ins=buff[start:end]
 		
-		inspoint = int( n*self.insert )
+		inspoint = int( len(new)*self.insert )
 		new = new[0:inspoint]+ins+new[inspoint:]
 
-		return pygame.image.fromstring(new,(image.get_width(), image.get_height()), "RGB", False)
+		g = pygame.image.fromstring(new,(image.get_width(), image.get_height()), "RGB", False)
+
+		return g
 
 class randomtransposition(transposebits):
 	def __init__(self):
@@ -568,6 +570,52 @@ class Greyscale(Sorter):
 		return image
 
 
+class CrossFade(Sorter):
+	def __init__(self, sorter, fadeprcnt):
+		self.sorter = sorter
+		self.fade = fadeprcnt
+
+	def sort(self,image):
+		imgcpy = image.copy()
+		imgcpy = self.sorter.sort(imgcpy)
+		for x in range(image.get_width()):
+			for y in range(image.get_height()):
+				a = image.get_at((x,y));
+				b = imgcpy.get_at((x,y));
+				imgcpy.set_at((x,y),
+					fixColor(pygame.Color(
+						int(b.r* (1-self.fade) + a.r * self.fade),
+						int(b.g* (1-self.fade) + a.g * self.fade),
+						int(b.b* (1-self.fade) + a.b * self.fade)
+					)))
+		return imgcpy
+
+class PreferringColor(Sorter):
+
+	r = 0
+	g = 1
+	b = 2
+
+	def __init__(self, color,forward=True):
+		self.coff = color
+		self.dir = not forward
+
+	def sort(self,image):
+		imgcpy = image.copy()
+		for x in range(image.get_width()):
+			for y in range(image.get_height()):
+
+				b = imgcpy.get_at((x,y))
+				b = sorted([b.r, b.g, b.b], reverse=True)
+				b = b[-self.coff:] + b[0:self.coff+1]
+				
+				imgcpy.set_at((x,y),
+					fixColor(pygame.Color(b[0],b[1],b[2])
+				))
+		return imgcpy
+
+
+
 
 def fixColor(color):
 	return (color[2],color[1],color[0]);
@@ -583,23 +631,21 @@ class TestPygameColors(Sorter):
 				out.set_at((x,y), fixColor(cul) );
 		return out;
 
-
-
-
+def PseudoSepia():
+	return CrossFade( PreferringColor(0), 0.4)
 
 
 
 def main():
-	pygame.init()
+	pygame.display.init()
 
 	print "working"
 
 	dispdone = "-s" in sys.argv
 
-	if dispdone:
-		pygame.display.set_mode((100,20))
+	sys.argv.remove("-s")
 
-	sorter = Chain( sortbycolumn(1) )
+	#sorter = Chain( sortbycolumn(1) )
 	#sorter = Chain( oradjacent(), rotate(1), sortbycolumn(20), rotate(-1) )
 	#sorter = Chain( andadjacent(), rotate(1), sortbycolumn(20), rotate(-1), sortbycolumn(20))
 	#sorter = Chain( sortbycolumn(5), rotate(-1), sortbycolumn(5), rotate(1) )
@@ -619,11 +665,17 @@ def main():
 	#sorter = apply_mask( Sorter(), xoradjacent(), invert( aware_block_mask(40)) )
 
 	#sorter = Chain( Melt(), flip(0,1) )
+	"""
 	sorter = Chain( 
-		oradjacent(),
+		CrossFade( oradjacent(), 0.3 ),
 		repeat(60, randomtransposition()),
 		Desaturate(0.6)
 		)
+	"""
+	sorter = Chain(
+		repeat(100, randomtransposition()),
+		PseudoSepia()
+	)
 
 	fil = "test.jpg"
 
@@ -641,14 +693,21 @@ def main():
 
 	if dispdone:
 		screen = pygame.display.set_mode((joined.get_width(), joined.get_height()))
+		screen.blit(joined,(0,0) )
+		pygame.display.flip()
 		running=True
 		while running:
 			for event in pygame.event.get():
-				if event.type == pygame.QUIT:
-					running=False
+				if event.type == pygame.KEYDOWN:
+					if event.key == pygame.K_ESCAPE:
+						running = False
+						break
+				if (event.type == pygame.QUIT):
+					running = False
+					break
 			sleep(1.0/60)
-			screen.blit(joined,(0,0) )
 			pygame.display.flip()
-
+		print "mainloop exiting";
+		pygame.quit();
+		print "pygame quit"
 main()
-
